@@ -17,6 +17,7 @@ public class NPCDialog : MonoBehaviour
     private bool npcAngry = false;       // Флаг, что NPC зол
     private Coroutine dialogCoroutine;   // Для отслеживания корутины
     private bool dialogActive = false;   // Идёт ли диалог
+    public GameObject killButton;
 
     private List<string> usedNpcDialogs = new List<string>();  // Список использованных фраз NPC
 
@@ -62,6 +63,7 @@ public class NPCDialog : MonoBehaviour
             {
                 dialogText.text = $"NPC: {angryPhrase}";
                 QuestToKillNPC();  // Игрок получает задание
+                killButton.SetActive(true);
                 yield break;  // Прервать диалог
             }
             else
@@ -108,6 +110,7 @@ public class NPCDialog : MonoBehaviour
 
         // Фиксируем, что при повторном заходе NPC будет злиться
         npcAngry = true;
+        killButton.SetActive(true);
     }
 
     private string GetUniquePhrase(string[] phrases)
@@ -134,5 +137,6 @@ public class NPCDialog : MonoBehaviour
     {
         questText.text = "Задание: Убей NPC!";
         StopDialog();  // Закрываем панель и завершаем диалог
+        killButton.SetActive(true);
     }
 }

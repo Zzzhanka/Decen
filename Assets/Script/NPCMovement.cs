@@ -20,6 +20,10 @@ public class NPCMovement : MonoBehaviour
     private bool atLunch = false;
     private bool isDead = false;
 
+    private void Start()
+    {
+        killButton.SetActive(false);
+    }
     private void Update()
     {
         int currentHour = gameTimeManager.GetCurrentHour();
