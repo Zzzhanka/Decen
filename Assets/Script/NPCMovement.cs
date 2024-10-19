@@ -5,26 +5,41 @@ using UnityEngine.Tilemaps;
 
 public class NPCMovement : MonoBehaviour
 {
-    public Transform workPoint;  // Точка работы
-    public Transform homePoint;  // Точка дома
-    public Tilemap tilemap;      // Тайлмап для маршрута
+    public Transform workPoint;
+    public Transform homePoint;
+    public Tilemap tilemap;
+    public GameTimeManager gameTimeManager;  // Ссылка на GameTimeManager
 
-    private Vector3Int[] path;   // Маршрут NPC
-    private int currentTarget = 0;
-    private bool atDestination = false;
+    private bool atWork = false;
 
-    private void Start()
+    private void Update()
     {
-        StartCoroutine(MoveToTarget(workPoint.position));  // Сначала идём на работу
+        int currentHour = gameTimeManager.GetCurrentHour();
+
+        // Выход на работу в 8:00
+        if (currentHour == 8 && !atWork)
+        {
+            StopAllCoroutines();
+            StartCoroutine(MoveToTarget(workPoint.position));
+            atWork = true;
+        }
+
+        // Возвращение домой в 17:00
+        if (currentHour == 10 && atWork)
+        {
+            StopAllCoroutines();
+            StartCoroutine(MoveToTarget(homePoint.position));
+            atWork = false;
+        }
     }
 
     private IEnumerator MoveToTarget(Vector3 destination)
     {
-        path = FindPath(transform.position, destination);
+        Vector3Int[] path = FindPath(transform.position, destination);
 
         foreach (var tilePos in path)
         {
-            Vector3 worldPos = tilemap.CellToWorld(tilePos) + new Vector3(0.5f, 0.5f, 0);  // Центр тайла
+            Vector3 worldPos = tilemap.CellToWorld(tilePos) + new Vector3(0.5f, 0.5f, 0);
             while (Vector3.Distance(transform.position, worldPos) > 0.1f)
             {
                 transform.position = Vector3.MoveTowards(transform.position, worldPos, 2f * Time.deltaTime);
@@ -32,88 +47,79 @@ public class NPCMovement : MonoBehaviour
             }
         }
 
-        yield return new WaitForSeconds(3f);  // Постоять 3 секунды
-
-        // Переход на следующий пункт назначения
-        if (!atDestination)
-        {
-            atDestination = true;
-            StartCoroutine(MoveToTarget(homePoint.position));  // Идём домой
-        }
+        yield return new WaitForSeconds(3f);  // Небольшая пауза на точке
     }
 
-    private Vector3Int[] FindPath(Vector3 start, Vector3 target)
+    // Реализация алгоритма A* для поиска пути
+    private Vector3Int[] FindPath(Vector3 startWorld, Vector3 destinationWorld)
     {
-        Vector3Int startCell = tilemap.WorldToCell(start);
-        Vector3Int targetCell = tilemap.WorldToCell(target);
+        Vector3Int start = tilemap.WorldToCell(startWorld);
+        Vector3Int destination = tilemap.WorldToCell(destinationWorld);
 
-        List<Vector3Int> openList = new List<Vector3Int>();
+        List<Vector3Int> openList = new List<Vector3Int> { start };
         HashSet<Vector3Int> closedList = new HashSet<Vector3Int>();
+
         Dictionary<Vector3Int, Vector3Int> cameFrom = new Dictionary<Vector3Int, Vector3Int>();
-
-        Dictionary<Vector3Int, float> gScore = new Dictionary<Vector3Int, float>();
-        gScore[startCell] = 0;
-
-        openList.Add(startCell);
+        Dictionary<Vector3Int, float> gScore = new Dictionary<Vector3Int, float> { [start] = 0 };
+        Dictionary<Vector3Int, float> fScore = new Dictionary<Vector3Int, float> { [start] = Heuristic(start, destination) };
 
         while (openList.Count > 0)
         {
-            Vector3Int current = GetLowestScoreCell(openList, gScore);
-            if (current == targetCell)
-                return ReconstructPath(cameFrom, current);
+            Vector3Int current = GetLowestScoreCell(openList, fScore);
+            if (current == destination) return ReconstructPath(cameFrom, current);
 
             openList.Remove(current);
             closedList.Add(current);
 
-            foreach (var neighbor in GetNeighbors(current))
+            foreach (Vector3Int neighbor in GetNeighbors(current))
             {
-                if (closedList.Contains(neighbor))
-                    continue;
+                if (closedList.Contains(neighbor)) continue;
 
-                float tentativeGScore = gScore[current] + Vector3.Distance(current, neighbor);
+                float tentativeGScore = gScore[current] + 1;
 
                 if (!openList.Contains(neighbor))
                     openList.Add(neighbor);
-                else if (tentativeGScore >= gScore[neighbor])
+                else if (tentativeGScore >= gScore.GetValueOrDefault(neighbor, float.MaxValue))
                     continue;
 
                 cameFrom[neighbor] = current;
                 gScore[neighbor] = tentativeGScore;
+                fScore[neighbor] = tentativeGScore + Heuristic(neighbor, destination);
             }
         }
+
         return new Vector3Int[0];  // Если путь не найден
     }
 
-    private Vector3Int GetLowestScoreCell(List<Vector3Int> openList, Dictionary<Vector3Int, float> gScore)
+    private Vector3Int GetLowestScoreCell(List<Vector3Int> openList, Dictionary<Vector3Int, float> fScore)
     {
         Vector3Int lowest = openList[0];
-        float lowestScore = gScore.ContainsKey(lowest) ? gScore[lowest] : Mathf.Infinity;
+        float lowestScore = fScore.GetValueOrDefault(lowest, float.MaxValue);
 
-        foreach (var cell in openList)
+        foreach (Vector3Int cell in openList)
         {
-            float score = gScore.ContainsKey(cell) ? gScore[cell] : Mathf.Infinity;
+            float score = fScore.GetValueOrDefault(cell, float.MaxValue);
             if (score < lowestScore)
             {
                 lowest = cell;
                 lowestScore = score;
             }
         }
+
         return lowest;
     }
 
-    private List<Vector3Int> GetNeighbors(Vector3Int cell)
+    private IEnumerable<Vector3Int> GetNeighbors(Vector3Int cell)
     {
-        List<Vector3Int> neighbors = new List<Vector3Int>
-        {
-            new Vector3Int(cell.x + 1, cell.y, cell.z),
-            new Vector3Int(cell.x - 1, cell.y, cell.z),
-            new Vector3Int(cell.x, cell.y + 1, cell.z),
-            new Vector3Int(cell.x, cell.y - 1, cell.z)
-        };
+        yield return new Vector3Int(cell.x + 1, cell.y, cell.z);
+        yield return new Vector3Int(cell.x - 1, cell.y, cell.z);
+        yield return new Vector3Int(cell.x, cell.y + 1, cell.z);
+        yield return new Vector3Int(cell.x, cell.y - 1, cell.z);
+    }
 
-        // Фильтруем только проходимые тайлы
-        neighbors.RemoveAll(n => !tilemap.HasTile(n));
-        return neighbors;
+    private float Heuristic(Vector3Int a, Vector3Int b)
+    {
+        return Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);  // Манхэттенское расстояние
     }
 
     private Vector3Int[] ReconstructPath(Dictionary<Vector3Int, Vector3Int> cameFrom, Vector3Int current)
@@ -122,8 +128,9 @@ public class NPCMovement : MonoBehaviour
         while (cameFrom.ContainsKey(current))
         {
             current = cameFrom[current];
-            totalPath.Insert(0, current);
+            totalPath.Add(current);
         }
+        totalPath.Reverse();
         return totalPath.ToArray();
     }
 }
