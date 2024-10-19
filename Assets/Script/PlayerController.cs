@@ -11,6 +11,13 @@ public class PlayerController : MonoBehaviour
 
     private Vector2 _movement;
 
+    public static PlayerController Instance { get; private set; }  // Статическая переменная для доступа к игроку
+
+    private void Awake()
+    {
+        Instance = this;  // Инициализируем статическую переменную
+    }
+
     void Update()
     {
         // Получаем значения осей джойстика

@@ -7,6 +7,7 @@ TagManager:
   - buisness
   - Walkable
   - OfficeWorker
+  - NPC
   layers:
   - Default
   - TransparentFX

@@ -2,46 +2,65 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
+using TMPro;
 
 public class NPCMovement : MonoBehaviour
 {
-    public Transform workPoint;
-    public Transform homePoint;
+    public Transform workPoint;  // Точка работы
+    public Transform homePoint;  // Точка дома
+    public Transform lunchPoint; // Точка обеда (например, кафе)
     public Tilemap tilemap;
-    public GameTimeManager gameTimeManager; // Ссылка на GameTimeManager
-
-    public float stopDistance = 1.5f;  // Дистанция остановки перед игроком
-    public NPCDialog npcDialog;        // Ссылка на скрипт для диалогов
+    public GameTimeManager gameTimeManager;  // Ссылка на GameTimeManager
+    public float killDistance = 1.5f;        // Расстояние для убийства NPC
+    public GameObject witnessPrefab;         // Префаб свидетеля
+    public GameObject killButton;            // Кнопка для убийства
+    public TextMeshProUGUI questText;        // Текст задания для отображения
 
     private bool atWork = false;
-    private bool isStopped = false;    // NPC остановился перед игроком
-    private Coroutine moveCoroutine;
+    private bool atLunch = false;
+    private bool isDead = false;
 
     private void Update()
     {
         int currentHour = gameTimeManager.GetCurrentHour();
 
-        if (!isStopped)  // Останавливать логику движения, если NPC остановлен
+        // Начало рабочего дня в 8:00
+        if (currentHour == 8 && !atWork && !atLunch)
         {
-            if (currentHour == 8 && !atWork)
-            {
-                MoveTo(workPoint.position);
-                atWork = true;
-            }
-            else if (currentHour == 17 && atWork)
-            {
-                MoveTo(homePoint.position);
-                atWork = false;
-            }
+            StopAllCoroutines();
+            StartCoroutine(MoveToTarget(workPoint.position));
+            atWork = true;
         }
-    }
 
-    private void MoveTo(Vector3 destination)
-    {
-        if (moveCoroutine != null)
-            StopCoroutine(moveCoroutine);
+        // Обед в 12:00
+        if (currentHour == 12 && atWork && !atLunch)
+        {
+            StopAllCoroutines();
+            StartCoroutine(MoveToTarget(lunchPoint.position));
+            atLunch = true;
+        }
 
-        moveCoroutine = StartCoroutine(MoveToTarget(destination));
+        // Возвращение на работу после обеда в 13:00
+        if (currentHour == 13 && atLunch)
+        {
+            StopAllCoroutines();
+            StartCoroutine(MoveToTarget(workPoint.position));
+            atLunch = false;
+        }
+
+        // Возвращение домой в 17:00
+        if (currentHour == 17 && atWork)
+        {
+            StopAllCoroutines();
+            StartCoroutine(MoveToTarget(homePoint.position));
+            atWork = false;
+        }
+
+        // Проверка на смерть NPC
+        if (isDead)
+        {
+            HandleWitnesses();
+        }
     }
 
     private IEnumerator MoveToTarget(Vector3 destination)
@@ -54,12 +73,6 @@ public class NPCMovement : MonoBehaviour
             while (Vector3.Distance(transform.position, worldPos) > 0.1f)
             {
                 transform.position = Vector3.MoveTowards(transform.position, worldPos, 2f * Time.deltaTime);
-
-                if (PlayerInRange())
-                {
-                    StopAndWaitForDialog();  // Остановка, если игрок рядом
-                    yield break;  // Прервать корутину движения
-                }
                 yield return null;
             }
         }
@@ -67,37 +80,37 @@ public class NPCMovement : MonoBehaviour
         yield return new WaitForSeconds(3f);  // Пауза на точке
     }
 
-    private bool PlayerInRange()
+    private void HandleWitnesses()
     {
-        GameObject player = GameObject.FindWithTag("Player");
-        if (player == null) return false;
-
-        float distance = Vector3.Distance(transform.position, player.transform.position);
-        return distance <= stopDistance;
-    }
-
-    private void StopAndWaitForDialog()
-    {
-        isStopped = true;
-        if (moveCoroutine != null)
-            StopCoroutine(moveCoroutine);
-
-        StartCoroutine(WaitForDialog(5f));
-    }
-
-    private IEnumerator WaitForDialog(float waitTime)
-    {
-        yield return new WaitForSeconds(waitTime);
-
-        if (PlayerInRange())  // Проверяем, всё ли ещё рядом игрок
+        Collider2D[] colliders = Physics2D.OverlapCircleAll(transform.position, 1000f);
+        foreach (var collider in colliders)
         {
-            npcDialog.StartDialog();  // Запуск диалога
+            if (collider.CompareTag("NPC") && collider.gameObject != this.gameObject)
+            {
+                Instantiate(witnessPrefab, collider.transform.position, Quaternion.identity);
+            }
         }
-
-        isStopped = false;  // NPC снова может двигаться
     }
 
-    // Алгоритм A* для поиска пути
+    public void KillNPC()
+    {
+        if (!isDead && Vector3.Distance(transform.position, PlayerController.Instance.transform.position) <= killDistance)
+        {
+            isDead = true;
+            killButton.SetActive(false);
+            UpdateQuestText("NPC убит");
+            Destroy(gameObject);
+        }
+    }
+
+    private void UpdateQuestText(string questName)
+    {
+        if (questText != null)
+        {
+            questText.text = questName;
+        }
+    }
+
     private Vector3Int[] FindPath(Vector3 startWorld, Vector3 destinationWorld)
     {
         Vector3Int start = tilemap.WorldToCell(startWorld);
@@ -135,7 +148,7 @@ public class NPCMovement : MonoBehaviour
             }
         }
 
-        return new Vector3Int[0];  // Путь не найден
+        return new Vector3Int[0];
     }
 
     private Vector3Int GetLowestScoreCell(List<Vector3Int> openList, Dictionary<Vector3Int, float> fScore)
@@ -166,7 +179,7 @@ public class NPCMovement : MonoBehaviour
 
     private float Heuristic(Vector3Int a, Vector3Int b)
     {
-        return Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);  // Манхэттенское расстояние
+        return Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
     }
 
     private Vector3Int[] ReconstructPath(Dictionary<Vector3Int, Vector3Int> cameFrom, Vector3Int current)
